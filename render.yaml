@@ -8,3 +8,15 @@ services:
     envVars:
       - key: GOOGLE_SERVICE_ACCOUNT
         sync: false
+      - key: CLIENT_ID
+        sync: false
+      - key: CLIENT_SECRET
+        sync: false
+      - key: TENANT_ID
+        sync: false
+      - key: SHAREPOINT_SITE
+        sync: false
+      - key: SHAREPOINT_FOLDER
+        sync: false
+      - key: SHAREPOINT_DOC
+        sync: false
