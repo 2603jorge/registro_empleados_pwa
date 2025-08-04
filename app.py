@@ -13,7 +13,10 @@ os.makedirs("static/fotos", exist_ok=True)
 
 # Configuración Google Sheets desde variable de entorno
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-service_account_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT"])
+# Leer variable de entorno y decodificar base64
+json_base64 = os.environ["GOOGLE_SERVICE_ACCOUNT"]
+service_account_info = json.loads(base64.b64decode(json_base64).decode("utf-8"))
+
 credenciales = ServiceAccountCredentials.from_json_keyfile_dict(service_account_info, scope)
 cliente = gspread.authorize(credenciales)
 # Abrir o crear archivo de Sheets
