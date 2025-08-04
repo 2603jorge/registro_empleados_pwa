@@ -1,48 +1,49 @@
-from flask import Flask, render_template, request, redirect, jsonify, send_from_directory
 import os
 import base64
-from datetime import datetime
-import openpyxl
+import json
 import requests
+from datetime import datetime
+from flask import Flask, request, render_template, redirect, jsonify, send_from_directory
+from openpyxl import load_workbook
 
 app = Flask(__name__)
 os.makedirs("static/fotos", exist_ok=True)
 
-# Datos SharePoint
-SHAREPOINT_SITE = "https://agricactus2.sharepoint.com/sites/CALIDAD"
-SHAREPOINT_FOLDER = "RegistrosEmpleados"
-EXCEL_FILE_NAME = "registro_empleados.xlsx"
-CLIENT_ID = os.environ.get("SHAREPOINT_CLIENT_ID")
-CLIENT_SECRET = os.environ.get("SHAREPOINT_CLIENT_SECRET")
-TENANT_ID = os.environ.get("SHAREPOINT_TENANT_ID")
+# Variables de entorno necesarias
+CLIENT_ID = os.environ["CLIENT_ID"]
+TENANT_ID = os.environ["TENANT_ID"]
+CLIENT_SECRET = os.environ["CLIENT_SECRET"]
+SHAREPOINT_SITE = "agricactus2.sharepoint.com"
+SHAREPOINT_SITE_NAME = "CALIDAD"
+SHAREPOINT_DOC = "registro_empleados.xlsx"
 
-# Obtener token
+# Función para obtener token de acceso
 def obtener_token():
     url = f"https://accounts.accesscontrol.windows.net/{TENANT_ID}/tokens/OAuth/2"
-    datos = {
-        "grant_type": "client_credentials",
-        "client_id": f"{CLIENT_ID}@{TENANT_ID}",
-        "client_secret": CLIENT_SECRET,
-        "resource": f"00000003-0000-0ff1-ce00-000000000000/{'agricactus2.sharepoint.com'}@{TENANT_ID}"
+    payload = {
+        'grant_type': 'client_credentials',
+        'client_id': f'{CLIENT_ID}@{TENANT_ID}',
+        'client_secret': CLIENT_SECRET,
+        'resource': f'spo.azure.com'
     }
-    respuesta = requests.post(url, data=datos)
-    return respuesta.json().get("access_token")
+    r = requests.post(url, data=payload)
+    return r.json()["access_token"]
 
-# Subir archivo Excel a SharePoint
-def subir_a_sharepoint(ruta_local):
-    token = obtener_token()
+# Función para subir archivo a SharePoint
+def subir_a_sharepoint(excel_local):
+    access_token = obtener_token()
     headers = {
-        "Authorization": f"Bearer {token}",
-        "Accept": "application/json;odata=verbose"
+        "Authorization": f"Bearer {access_token}"
     }
-    # Leer archivo
-    with open(ruta_local, "rb") as f:
-        contenido = f.read()
-    # Subirlo
-    url = f"{SHAREPOINT_SITE}/_api/web/GetFolderByServerRelativeUrl('{SHAREPOINT_FOLDER}')/Files/add(url='{EXCEL_FILE_NAME}',overwrite=true)"
-    requests.post(url, headers=headers, data=contenido)
 
-# Guardar foto
+    upload_url = f"https://{SHAREPOINT_SITE}/sites/{SHAREPOINT_SITE_NAME}/_api/web/GetFolderByServerRelativeUrl('Shared Documents')/Files/add(url='{SHAREPOINT_DOC}',overwrite=true)"
+
+    with open(excel_local, 'rb') as f:
+        response = requests.post(upload_url, headers=headers, data=f)
+    return response.status_code == 200
+
+# Guardar archivos individuales
+
 def guardar_archivo(nombre_base, base64_data):
     if base64_data:
         ext = ".jpg" if "image" in base64_data else ".pdf"
@@ -58,53 +59,41 @@ def index():
     if request.method == "POST":
         try:
             datos = request.get_json() if request.is_json else request.form
-            archivos = request.files if not request.is_json else {}
+            archivos = request.files if not request.is_json else None
 
-            nombres_archivos = {
-                "ine_frente": guardar_archivo("ine_frente", datos.get("ine_frente")),
-                "ine_reverso": guardar_archivo("ine_reverso", datos.get("ine_reverso")),
-                "curp_archivo": guardar_archivo("curp_archivo", datos.get("curp_archivo")),
-                "documentos": guardar_archivo("documentos", datos.get("documentos_base64")),
-                "foto": guardar_archivo("foto", datos.get("foto_base64"))
+            archivos_nombres = {
+                "ine_frente": guardar_archivo("ine_frente", datos.get("ine_frente")) if request.is_json else archivos["ine_frente"].filename,
+                "ine_reverso": guardar_archivo("ine_reverso", datos.get("ine_reverso")) if request.is_json else archivos["ine_reverso"].filename,
+                "curp_archivo": guardar_archivo("curp_archivo", datos.get("curp_archivo")) if request.is_json else archivos["curp_archivo"].filename,
+                "documentos": guardar_archivo("documentos", datos.get("documentos_base64")) if request.is_json else archivos["documentos"].filename,
+                "foto": guardar_archivo("foto", datos.get("foto_base64")) if request.is_json else archivos["foto"].filename,
             }
 
             fila = [
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                datos.get("nombre", ""), datos.get("edad", ""), datos.get("curp", ""),
-                datos.get("rfc", ""), datos.get("nss", ""), datos.get("telefono", ""),
-                datos.get("direccion", ""), datos.get("leer_escribir", ""), datos.get("discapacidad", ""),
-                datos.get("experiencia", ""), datos.get("salud", ""), datos.get("origen", ""),
-                datos.get("observaciones", ""), datos.get("trabajo_previo", ""), datos.get("año_trabajo", ""),
-                datos.get("area_trabajo", ""), datos.get("contacto_emergencia", ""),
-                datos.get("telefono_emergencia", ""), nombres_archivos["ine_frente"], nombres_archivos["ine_reverso"],
-                nombres_archivos["curp_archivo"], nombres_archivos["documentos"], nombres_archivos["foto"]
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S"), datos.get("nombre", ""), datos.get("edad", ""), datos.get("curp", ""),
+                datos.get("rfc", ""), datos.get("nss", ""), datos.get("telefono", ""), datos.get("direccion", ""),
+                datos.get("leer_escribir", ""), datos.get("discapacidad", ""), datos.get("experiencia", ""), datos.get("salud", ""),
+                datos.get("origen", ""), datos.get("observaciones", ""), datos.get("trabajo_previo", ""), datos.get("año_trabajo", ""),
+                datos.get("area_trabajo", ""), datos.get("contacto_emergencia", ""), datos.get("telefono_emergencia", ""),
+                archivos_nombres["ine_frente"], archivos_nombres["ine_reverso"], archivos_nombres["curp_archivo"],
+                archivos_nombres["documentos"], archivos_nombres["foto"]
             ]
 
-            ruta_local = os.path.abspath(EXCEL_FILE_NAME)
-            if not os.path.exists(ruta_local):
-                wb = openpyxl.Workbook()
-                ws = wb.active
-                ws.append([
-                    "Fecha", "Nombre", "Edad", "CURP", "RFC", "NSS", "Teléfono",
-                    "Dirección", "Leer/Escribir", "Discapacidad", "Experiencia",
-                    "Salud", "Origen", "Observaciones", "Trabajo previo",
-                    "Año trabajo", "Área trabajo", "Contacto emergencia",
-                    "Teléfono emergencia", "INE Frente", "INE Reverso", "CURP Archivo",
-                    "Acta/Comprobante", "Foto facial"
-                ])
-            else:
-                wb = openpyxl.load_workbook(ruta_local)
-                ws = wb.active
-
+            archivo_excel_local = "registro_empleados.xlsx"
+            wb = load_workbook(archivo_excel_local)
+            ws = wb.active
             ws.append(fila)
-            wb.save(ruta_local)
+            wb.save(archivo_excel_local)
 
-            subir_a_sharepoint(ruta_local)
+            if subir_a_sharepoint(archivo_excel_local):
+                return jsonify({"ok": True}), 200
+            else:
+                return jsonify({"error": "No se pudo subir a SharePoint"}), 500
 
-            return jsonify({"ok": True}), 200
         except Exception as e:
             print(f"Error: {e}")
-            return "Error interno", 500
+            return jsonify({"error": str(e)}), 500
+
     return render_template("index.html")
 
 @app.route('/service-worker.js')
