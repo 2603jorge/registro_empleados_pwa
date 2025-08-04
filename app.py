@@ -17,33 +17,38 @@ SHAREPOINT_SITE = "agricactus2.sharepoint.com"
 SHAREPOINT_SITE_NAME = "CALIDAD"
 SHAREPOINT_DOC = "registro_empleados.xlsx"
 
-# Función para obtener token de acceso
+# ✅ NUEVO método para obtener token moderno de Microsoft Identity Platform
 def obtener_token():
-    url = f"https://accounts.accesscontrol.windows.net/{TENANT_ID}/tokens/OAuth/2"
-    payload = {
-        'grant_type': 'client_credentials',
-        'client_id': f'{CLIENT_ID}@{TENANT_ID}',
-        'client_secret': CLIENT_SECRET,
-        'resource': f'spo.azure.com'
+    url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded"
     }
-    r = requests.post(url, data=payload)
+    data = {
+        'grant_type': 'client_credentials',
+        'client_id': CLIENT_ID,
+        'client_secret': CLIENT_SECRET,
+        'scope': 'https://graph.microsoft.com/.default'
+    }
+    r = requests.post(url, headers=headers, data=data)
+    r.raise_for_status()
     return r.json()["access_token"]
 
-# Función para subir archivo a SharePoint
+# ✅ Subir archivo a SharePoint usando el token de Graph API
 def subir_a_sharepoint(excel_local):
     access_token = obtener_token()
     headers = {
-        "Authorization": f"Bearer {access_token}"
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/json;odata=verbose",
+        "Content-Type": "application/octet-stream"
     }
 
-    upload_url = f"https://{SHAREPOINT_SITE}/sites/{SHAREPOINT_SITE_NAME}/_api/web/GetFolderByServerRelativeUrl('Shared Documents')/Files/add(url='{SHAREPOINT_DOC}',overwrite=true)"
+    upload_url = f"https://{SHAREPOINT_SITE}/sites/{SHAREPOINT_SITE_NAME}/_api/web/GetFolderByServerRelativeUrl('Shared Documents/DOCUMENTOS')/Files/add(url='{SHAREPOINT_DOC}',overwrite=true)"
 
     with open(excel_local, 'rb') as f:
         response = requests.post(upload_url, headers=headers, data=f)
     return response.status_code == 200
 
-# Guardar archivos individuales
-
+# Guardar imágenes/documentos locales antes de subir
 def guardar_archivo(nombre_base, base64_data):
     if base64_data:
         ext = ".jpg" if "image" in base64_data else ".pdf"
@@ -54,6 +59,7 @@ def guardar_archivo(nombre_base, base64_data):
         return nombre_archivo
     return ""
 
+# Ruta principal
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
