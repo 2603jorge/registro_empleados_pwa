@@ -1,5 +1,5 @@
 flask
-openpyxl
 gunicorn
 gspread
 oauth2client
+openpyxl
