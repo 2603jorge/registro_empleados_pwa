@@ -1,5 +1,3 @@
-Flask
-gunicorn
-gspread
-oauth2client
+requests
 openpyxl
+python-dotenv
