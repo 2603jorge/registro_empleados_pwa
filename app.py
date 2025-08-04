@@ -11,44 +11,49 @@ os.makedirs("static/fotos", exist_ok=True)
 
 # Variables de entorno necesarias
 CLIENT_ID = os.environ["CLIENT_ID"]
-TENANT_ID = os.environ["TENANT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
-SHAREPOINT_SITE = "agricactus2.sharepoint.com"
-SHAREPOINT_SITE_NAME = "CALIDAD"
-SHAREPOINT_DOC = "registro_empleados.xlsx"
+TENANT_ID = os.environ["TENANT_ID"]
+SHAREPOINT_SITE = os.environ["SHAREPOINT_SITE"]  # URL completa
+SHAREPOINT_FOLDER = os.environ["SHAREPOINT_FOLDER"]
+SHAREPOINT_DOC = os.environ["SHAREPOINT_DOC"]
 
-# ✅ NUEVO método para obtener token moderno de Microsoft Identity Platform
+# Obtener access token con endpoint moderno
 def obtener_token():
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded"
-    }
+    headers = {"Content-Type": "application/x-www-form-urlencoded"}
     data = {
-        'grant_type': 'client_credentials',
-        'client_id': CLIENT_ID,
-        'client_secret': CLIENT_SECRET,
-        'scope': 'https://graph.microsoft.com/.default'
+        "client_id": CLIENT_ID,
+        "scope": "https://graph.microsoft.com/.default",
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "client_credentials"
     }
-    r = requests.post(url, headers=headers, data=data)
-    r.raise_for_status()
-    return r.json()["access_token"]
+    response = requests.post(url, headers=headers, data=data)
+    if response.status_code == 200:
+        return response.json()["access_token"]
+    else:
+        print("Error al obtener token:", response.text)
+        raise Exception("No se pudo obtener access_token")
 
-# ✅ Subir archivo a SharePoint usando el token de Graph API
+# Subir archivo a SharePoint (con Graph API)
 def subir_a_sharepoint(excel_local):
-    access_token = obtener_token()
+    token = obtener_token()
     headers = {
-        "Authorization": f"Bearer {access_token}",
-        "Accept": "application/json;odata=verbose",
-        "Content-Type": "application/octet-stream"
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     }
 
-    upload_url = f"https://{SHAREPOINT_SITE}/sites/{SHAREPOINT_SITE_NAME}/_api/web/GetFolderByServerRelativeUrl('Shared Documents/DOCUMENTOS')/Files/add(url='{SHAREPOINT_DOC}',overwrite=true)"
+    # Extraer sitio y nombre de carpeta desde la URL
+    sitio = SHAREPOINT_SITE.replace("https://", "")
+    carpeta = SHAREPOINT_FOLDER
+    archivo = SHAREPOINT_DOC
 
-    with open(excel_local, 'rb') as f:
-        response = requests.post(upload_url, headers=headers, data=f)
-    return response.status_code == 200
+    url = f"https://graph.microsoft.com/v1.0/sites/{sitio}/drive/root:/{carpeta}/{archivo}:/content"
 
-# Guardar imágenes/documentos locales antes de subir
+    with open(excel_local, "rb") as f:
+        r = requests.put(url, headers=headers, data=f.read())
+    return r.status_code in [200, 201]
+
+# Guardar imágenes/documentos
 def guardar_archivo(nombre_base, base64_data):
     if base64_data:
         ext = ".jpg" if "image" in base64_data else ".pdf"
@@ -59,7 +64,6 @@ def guardar_archivo(nombre_base, base64_data):
         return nombre_archivo
     return ""
 
-# Ruta principal
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -102,10 +106,9 @@ def index():
 
     return render_template("index.html")
 
-@app.route('/service-worker.js')
+@app.route("/service-worker.js")
 def sw():
-    return send_from_directory('static', 'service-worker.js')
+    return send_from_directory("static", "service-worker.js")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
-
