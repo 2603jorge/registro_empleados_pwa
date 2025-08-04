@@ -2,6 +2,5 @@ services:
   - type: web
     name: registro_empleados_pwa
     env: python
-    plan: free
     buildCommand: ""
     startCommand: gunicorn app:app
