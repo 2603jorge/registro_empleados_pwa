@@ -1,6 +1,10 @@
 services:
   - type: web
-    name: registro_empleados_pwa
+    name: registro-empleados
     env: python
     buildCommand: ""
-    startCommand: gunicorn app:app
+    startCommand: python app.py
+    plan: free
+    envVars:
+      - key: GOOGLE_SERVICE_ACCOUNT
+        sync: false
