@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: registro-empleados
+    name: registro_empleados_pwa
     env: python
     plan: free
     buildCommand: ""
