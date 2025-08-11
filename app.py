@@ -236,6 +236,23 @@ def sw():
 @app.route("/manifest.json")
 def manifest():
     return send_from_directory("static", "manifest.json")
+@app.route("/debug-site")
+def debug_site():
+    try:
+        token = obtener_token()
+        hostname, site_path = normalizar_site_url(SHAREPOINT_SITE)
+        url = f"{GRAPH}/sites/{hostname}:/{site_path}?$select=id,webUrl"
+        r = requests.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        return jsonify({
+            "env_SHAREPOINT_SITE": SHAREPOINT_SITE,
+            "hostname": hostname,
+            "site_path": site_path,
+            "graph_url": url,
+            "status": r.status_code,
+            "graph_response": r.json() if r.headers.get("content-type","").startswith("application/json") else r.text[:500]
+        }), r.status_code
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     # En Render se usa gunicorn; esto es para pruebas locales.
