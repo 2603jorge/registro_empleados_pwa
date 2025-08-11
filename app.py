@@ -14,18 +14,23 @@ os.makedirs("static/fotos", exist_ok=True)
 CLIENT_ID = os.environ["CLIENT_ID"]
 CLIENT_SECRET = os.environ["CLIENT_SECRET"]
 TENANT_ID = os.environ["TENANT_ID"]
-SHAREPOINT_SITE = os.environ["SHAREPOINT_SITE"]  # p.ej. https://agricactus2.sharepoint.com/sites/CALIDAD
-SHAREPOINT_FOLDER = os.environ.get("SHAREPOINT_FOLDER", "").strip()  # p.ej. "Documentos" (opcional)
-SHAREPOINT_DOC = os.environ["SHAREPOINT_DOC"]  # p.ej. "registro_empleados.xlsx"
+# p.ej. https://agricactus2.sharepoint.com/sites/CALIDAD
+SHAREPOINT_SITE = os.environ["SHAREPOINT_SITE"]
+# p.ej. "DOCUMENTOS"
+SHAREPOINT_LIBRARY = os.environ.get("SHAREPOINT_LIBRARY", "DOCUMENTOS").strip()
+# p.ej. subcarpeta dentro de la biblioteca, o vacío para raíz
+SHAREPOINT_FOLDER = os.environ.get("SHAREPOINT_FOLDER", "").strip()
+# p.ej. "registro_empleados.xlsx"
+SHAREPOINT_DOC = os.environ["SHAREPOINT_DOC"]
+
+# ===== Ctes =====
+GRAPH = "https://graph.microsoft.com/v1.0"
 
 # ===== Token cache sencillo =====
-_token_cache = {"value": None, "expires_at": 0}
 _site_id_cache = {"value": None}
 
 def obtener_token():
-    """
-    Obtiene un access token (client_credentials) para Microsoft Graph.
-    """
+    """Obtiene un access token (client_credentials) para Microsoft Graph."""
     url = f"https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"
     headers = {"Content-Type": "application/x-www-form-urlencoded"}
     data = {
@@ -40,27 +45,29 @@ def obtener_token():
         raise Exception("No se pudo obtener access_token")
     return r.json()["access_token"]
 
-def parsear_site_url(site_url: str):
+def normalizar_site_url(site_url: str):
     """
-    Convierte 'https://tenant.sharepoint.com/sites/SITIO'
-    en hostname='tenant.sharepoint.com' y site_path='/sites/SITIO'
+    Devuelve hostname y el path del SITIO solamente, p.ej.:
+    https://agricactus2.sharepoint.com/sites/CALIDAD/SitePages/CollabHome.aspx
+    -> ('agricactus2.sharepoint.com', '/sites/CALIDAD')
     """
-    p = urlparse(site_url)
+    p = urlparse(site_url.strip())
     hostname = p.netloc
-    site_path = p.path if p.path.startswith("/") else f"/{p.path}"
+    partes = [seg for seg in p.path.split("/") if seg]
+    site_path = ""
+    if len(partes) >= 2 and partes[0].lower() == "sites":
+        site_path = f"/sites/{partes[1]}"
+    else:
+        site_path = p.path if p.path.startswith("/") else f"/{p.path}"
     return hostname, site_path
 
 def obtener_site_id():
-    """
-    Resuelve el siteId a partir de SHAREPOINT_SITE usando:
-    GET /v1.0/sites/{hostname}:/{site-path}
-    """
+    """Resuelve el siteId usando /v1.0/sites/{hostname}:/{site-path}?$select=id."""
     if _site_id_cache["value"]:
         return _site_id_cache["value"]
-
     token = obtener_token()
-    hostname, site_path = parsear_site_url(SHAREPOINT_SITE)
-    url = f"https://graph.microsoft.com/v1.0/sites/{hostname}:{site_path}"
+    hostname, site_path = normalizar_site_url(SHAREPOINT_SITE)
+    url = f"{GRAPH}/sites/{hostname}:/{site_path}?$select=id,webUrl"
     headers = {"Authorization": f"Bearer {token}"}
     r = requests.get(url, headers=headers, timeout=30)
     if r.status_code != 200:
@@ -72,22 +79,42 @@ def obtener_site_id():
     _site_id_cache["value"] = site_id
     return site_id
 
+def obtener_drive_id(site_id: str, library_name: str):
+    """
+    Busca el drive (biblioteca) por displayName/name (p.ej. 'DOCUMENTOS').
+    """
+    token = obtener_token()
+    url = f"{GRAPH}/sites/{site_id}/drives"
+    headers = {"Authorization": f"Bearer {token}"}
+    r = requests.get(url, headers=headers, timeout=30)
+    if r.status_code != 200:
+        print("Error listando drives:", r.text)
+        raise Exception("No se pudieron obtener las bibliotecas del sitio")
+
+    data = r.json().get("value", [])
+    for d in data:
+        if d.get("displayName") == library_name or d.get("name") == library_name:
+            return d["id"]
+
+    nombres = [f"{d.get('displayName')}|{d.get('name')}" for d in data]
+    raise Exception(f"No se encontró la biblioteca '{library_name}'. Disponibles: {nombres}")
+
 def subir_a_sharepoint(ruta_excel_local: str):
     """
-    Sube el archivo Excel al drive por defecto del sitio:
-    PUT /v1.0/sites/{siteId}/drive/root:/{folder}/{file}:/content
-    Si SHAREPOINT_FOLDER está vacío, se sube a la raíz del drive.
+    Sube/reemplaza el archivo en la biblioteca indicada (SHAREPOINT_LIBRARY).
+    Usa: PUT /drives/{driveId}/root:/carpeta/archivo:/content
     """
     token = obtener_token()
     site_id = obtener_site_id()
+    drive_id = obtener_drive_id(site_id, SHAREPOINT_LIBRARY)
 
-    # Construimos el path destino en el drive
+    # Construimos la ruta destino dentro de la biblioteca
     if SHAREPOINT_FOLDER:
         drive_path = f"/{SHAREPOINT_FOLDER.strip('/')}/{SHAREPOINT_DOC}"
     else:
         drive_path = f"/{SHAREPOINT_DOC}"
 
-    url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/drive/root:{drive_path}:/content"
+    url = f"{GRAPH}/drives/{drive_id}/root:{drive_path}:/content"
     headers = {
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -127,9 +154,7 @@ def guardar_archivo(nombre_base: str, base64_data: str):
         return ""
 
 def asegurar_excel_local(path_excel: str):
-    """
-    Si no existe el Excel local, lo crea con encabezados.
-    """
+    """Si no existe el Excel local, lo crea con encabezados."""
     if os.path.exists(path_excel):
         return
     wb = Workbook()
@@ -208,12 +233,11 @@ def index():
 def sw():
     return send_from_directory("static", "service-worker.js")
 
-# (Opcional) servir manifest si lo tienes en /static/manifest.json
 @app.route("/manifest.json")
 def manifest():
     return send_from_directory("static", "manifest.json")
 
 if __name__ == "__main__":
-    # Para desarrollo local. En Render se usará gunicorn (Procfile).
+    # En Render se usa gunicorn; esto es para pruebas locales.
     app.run(host="0.0.0.0", port=5000)
 
